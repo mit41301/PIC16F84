@@ -2,7 +2,7 @@
 ;	NAME			: DS1820_LCD
 ;	DATE			: 14-03-2005
 ;	AUTHOR			: Heino Peters
-;	DESCRIPTION		: Assmbly software for PIC16F84 to display temperature,
+;	DESCRIPTION		: Assmbly software for PIC16F84A to display temperature,
 ;					  measured with DS1820 on a 2x16 character HD44780-based
 ;					  LCD display, with 4-bits datatransfer via CMOS 4094, HG-2006
 ;=================================================================================
@@ -11,6 +11,7 @@
 	list    p=16f84a
 	include <p16f84a.inc>
 	__config _CP_OFF & _PWRTE_ON & _WDT_OFF & _XT_OSC
+    __idlocs H'866F' ;Checksum: 0x866f
 
 ;	DEFINITION PORTA (A0-A4)
 	#define	IN_OUT_PORTA
