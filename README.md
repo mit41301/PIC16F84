@@ -5,3 +5,4 @@
 ## Code Lock  
 This is a device, built around a PIC16F84-04, which activates an output when the correct access code has been entered on a keypad. This code consists of six digits in the range 0 to 9. The code can be changed by the user and is also remembered when the power is off. A buzzer has been added to provide input feedback, the number of beeps indicates whether the input has been entered correctly or not. This circuit is eminently suitable as an electronic door lock, the switching section of a burglar alarm or as an ignition blocking device.
 
+https://www.elektormagazine.com/magazine/elektor-200112/17140  
