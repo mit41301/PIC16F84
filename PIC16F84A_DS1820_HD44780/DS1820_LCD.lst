@@ -1,0 +1,864 @@
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  1
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00001 ;=================================================================================
+                      00002 ;       NAME                    : DS1820_LCD
+                      00003 ;       DATE                    : 14-03-2005
+                      00004 ;       AUTHOR                  : Heino Peters
+                      00005 ;       DESCRIPTION             : Assmbly software for PIC16F84 to display temperature,
+                      00006 ;                                         measured with DS1820 on a 2x16 character HD44780-based
+                      00007 ;                                         LCD display, with 4-bits datatransfer via CMOS 4094, HG-2006
+                      00008 ;=================================================================================
+                      00009 ;       SETTINGS
+                      00010         ErrorLevel -302                                                 ;suppress message 302 (proper ba
+                            nk)
+                      00011         list    p=16f84a
+                      00012         include <p16f84a.inc>
+                      00001         LIST
+                      00002 
+                      00003 ;==========================================================================
+                      00004 ;  MPASM PIC16F84A processor include
+                      00005 ; 
+                      00006 ;  (c) Copyright 1999-2013 Microchip Technology, All rights reserved
+                      00007 ;==========================================================================
+                      00008 
+                      00208         LIST
+2007   3FF1           00013         __config _CP_OFF & _PWRTE_ON & _WDT_OFF & _XT_OSC
+                      00014 
+                      00015 ;       DEFINITION PORTA (A0-A4)
+                      00016         #define IN_OUT_PORTA
+                      00017         #define CLOCK_LCD               PORTA,0                 ;pin 17
+                      00018         #define DATA_LCD                PORTA,1                 ;pin 18
+                      00019         #define STROBE_LCD              PORTA,2                 ;pin 1
+                      00020         #define DATA_DS1820             PORTA,4                 ;pin 3, open collector
+                      00021 
+                      00022 ;       DEFINITION PORTB (B0-B7)
+                      00023         #define IN_OUT_PORTB
+                      00024         #define LDR                             PORTB,4                 ;pin 10
+                      00025 
+                      00026 ;       BASIC PARAMETERS
+0000                  00027         org             H'00'                                                   ;reset vector
+0000   2801           00028         goto    MAIN_PROGRAM                                    ;main
+  0000000C            00029 RAM                     equ     H'0C'                                           ;start of RAM
+                      00030 
+                      00031 ;       RAM
+                      00032         cblock  RAM
+  0000000C            00033                         COUNTER_1
+  0000000D            00034                         COUNTER_2
+  0000000E            00035                         COUNTER_3
+  0000000F            00036                         BIT
+  00000010            00037                         BITS
+  00000011            00038                         BYTE
+  00000012            00039                         CRC_CHECK
+  00000013            00040                         DECADES
+  00000014            00041                         LCD_BYTE
+  00000015            00042                         MEM_1
+  00000016            00043                         DS1820_SIGN
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  2
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+  00000017            00044                         DS1820_TEMP
+  00000018            00045                         DS1820_ERROR
+                      00046         endc
+                      00047 
+                      00048 ;       LCD_BYTE
+                      00049         #define RS                                      LCD_BYTE,0
+                      00050         #define LCD_1                           LCD_BYTE,1      ;for free use
+                      00051         #define LCD_2                           LCD_BYTE,2      ;for free use
+                      00052         #define BACKLIGHT                       LCD_BYTE,3
+                      00053 
+                      00054 ;       BITS
+                      00055         #define DS1820_INPUT_BIT        BITS,0
+                      00056         #define DS1820_TEMP_HALF        BITS,1
+                      00057         #define DS1820_TEMP_100         BITS,2
+                      00058 
+                      00059 ;       DS1820_ERROR
+                      00060         #define DS1820_SHORTED          DS1820_ERROR,0  ;shorted to ground
+                      00061         #define DS1820_NO_DEVICE        DS1820_ERROR,1  ;no device or shorted to +5V
+                      00062         #define DS1820_CRC_ERROR        DS1820_ERROR,2  ;read-error or more than 1 DS1820
+                      00063 
+                      00064 ;=================================================================================
+0001                  00065 MAIN_PROGRAM
+0001   200A           00066         call    INIT
+0002                  00067 main_0
+0002   206D           00068         call    READ_DS1820
+0003   0898           00069         movf    DS1820_ERROR,1
+0004   1D03           00070         btfss   STATUS,Z
+0005   2808           00071         goto    main_1
+0006   20D3           00072         call    DISPLAY_TEMPERATURE
+0007   2802           00073         goto    main_0
+0008                  00074 main_1
+0008   2137           00075         call    DISPLAY_ERROR
+0009   2802           00076         goto    main_0
+                      00077 
+                      00078 ;=================================================================================
+000A                  00079 INIT
+000A   1683           00080         bsf             STATUS,RP0
+000B   3000           00081         movlw   B'00000000'                     ;define all I/O ports RA0-RA4
+000C   0085           00082         movwf   TRISA
+000D   3010           00083         movlw   B'00010000'                     ;define all I/O ports RB0-RB7
+000E   0086           00084         movwf   TRISB
+000F   1283           00085         bcf             STATUS,RP0
+0010   0185           00086         clrf    PORTA                           ;clear all output ports RA0-RA4
+0011   0186           00087         clrf    PORTB                           ;clear all output ports RB0-RB7
+0012   1005           00088         bcf             CLOCK_LCD                       ;reset CLOCK
+0013   1605           00089         bsf             DATA_DS1820                     ;release dataline DS1820
+0014   2016           00090         call    LCD_INIT                        ;initialize LCD-module
+0015   0008           00091         return
+                      00092 
+                      00093 ;=================================================================================
+0016                  00094 LCD_INIT
+0016   3028           00095         movlw   D'40'                           ;LCD-module needs 40 ms after power rise
+0017   2169           00096         call    WAIT_1ms
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  3
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+0018   1105           00097         bcf             STROBE_LCD                      ;STROBE low
+0019   1005           00098         bcf             CLOCK_LCD                       ;CLOCK low
+001A   0194           00099         clrf    LCD_BYTE                        ;RS='0', BACKLIGHT is off
+001B   3020           00100         movlw   B'00100000'                     ;set interface to 4 bits
+001C   2055           00101         call    LCD_WRITE_BYTE
+001D   3005           00102         movlw   D'5'                            ;LCD-module needs 5 ms for processing
+001E   2169           00103         call    WAIT_1ms
+001F   3028           00104         movlw   B'00101000'                     ;4-bits interface, 2 lines, 5x7 matrix
+0020   2055           00105         call    LCD_WRITE_BYTE
+0021   3005           00106         movlw   D'5'                            ;LCD-module needs 5 ms for processing
+0022   2169           00107         call    WAIT_1ms
+0023   300C           00108         movlw   B'00001100'                     ;display on, cursor off
+0024   2055           00109         call    LCD_WRITE_BYTE
+0025   3006           00110         movlw   B'00000110'                     ;cursor moves automatically to next position
+0026   2055           00111         call    LCD_WRITE_BYTE
+                      00112                                                                 ;define degree-symbol "º" as ASCII 0
+0027   3040           00113         movlw   B'01000000'
+0028   2055           00114         call    LCD_WRITE_BYTE
+0029   1414           00115         bsf             RS
+002A   3006           00116         movlw   B'00000110'                     ;upper line of 7x5 matrix
+002B   2052           00117         call    LCD_WRITE_CHARACTER
+002C   3009           00118         movlw   B'00001001'                     ;2nd line of 7x5 matrix
+002D   2052           00119         call    LCD_WRITE_CHARACTER
+002E   3009           00120         movlw   B'00001001'                     ;and so on
+002F   2052           00121         call    LCD_WRITE_CHARACTER
+0030   3006           00122         movlw   B'00000110'
+0031   2052           00123         call    LCD_WRITE_CHARACTER
+0032   3000           00124         movlw   B'00000000'
+0033   2052           00125         call    LCD_WRITE_CHARACTER
+0034   3000           00126         movlw   B'00000000'
+0035   2052           00127         call    LCD_WRITE_CHARACTER
+0036   3000           00128         movlw   B'00000000'
+0037   2052           00129         call    LCD_WRITE_CHARACTER
+0038   3000           00130         movlw   B'00000000'
+0039   2052           00131         call    LCD_WRITE_CHARACTER
+                      00132 
+003A   203C           00133         call    LCD_CLEAR_SCREEN
+003B   0008           00134         return
+                      00135 
+                      00136 ;=================================================================================
+003C                  00137 LCD_CLEAR_SCREEN                                ;clears screen, cursor on upper left position
+003C   1014           00138         bcf             RS
+003D   3001           00139         movlw   B'00000001'
+003E   2055           00140         call    LCD_WRITE_BYTE
+003F   3002           00141         movlw   D'2'                            ;LCD-module needs 2 ms for processing
+0040   2169           00142         call    WAIT_1ms
+0041   0008           00143         return
+                      00144 
+0042                  00145 LCD_START_LINE_1                                ;put cursor on 1st position of 1st line
+0042   1014           00146         bcf             RS
+0043   3080           00147         movlw   B'10000000'
+0044   2055           00148         call    LCD_WRITE_BYTE
+0045   0008           00149         return
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  4
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00150 
+0046                  00151 LCD_START_LINE_2                                ;put cursor on 1st position of 2nd line
+0046   1014           00152         bcf             RS
+0047   30C0           00153         movlw   B'11000000'
+0048   2055           00154         call    LCD_WRITE_BYTE
+0049   0008           00155         return
+                      00156 
+004A                  00157 LCD_START_LINE_3                                ;put cursor on 1st position of 3rd line
+004A   1014           00158         bcf             RS
+004B   3090           00159         movlw   B'10010000'
+004C   2055           00160         call    LCD_WRITE_BYTE
+004D   0008           00161         return
+                      00162 
+004E                  00163 LCD_START_LINE_4                                ;put cursor on 1st position of 4th line
+004E   1014           00164         bcf             RS
+004F   30D0           00165         movlw   B'11010000'
+0050   2055           00166         call    LCD_WRITE_BYTE
+0051   0008           00167         return
+                      00168 
+0052                  00169 LCD_WRITE_CHARACTER                             ;display character from workspace
+0052   1414           00170         bsf             RS
+0053   2055           00171         call    LCD_WRITE_BYTE
+0054   0008           00172         return
+                      00173 
+                      00174 ;=================================================================================
+0055                  00175 LCD_WRITE_BYTE                                  ;writes 8 bits from workspace with given RS/BL
+0055   0095           00176         movwf   MEM_1                           ;keep 2nd half of databyte stored
+0056   205A           00177         call    LCD_WRITE_HALF          ;send 1st half of databyte (bit 7-4)
+0057   0E15           00178         swapf   MEM_1,0                         ;get back 2nd half of databyte
+0058   205A           00179         call    LCD_WRITE_HALF          ;send 2nd half of databyte (bit 3-0)
+0059   0008           00180         return
+                      00181 
+005A                  00182 LCD_WRITE_HALF
+005A   39F0           00183         andlw   B'11110000'                     ;select only the first 4 bits
+005B   0091           00184         movwf   BYTE                            ;store them in BYTE
+005C   0814           00185         movf    LCD_BYTE,0                      ;get LCD_BYTE for the right 4 bits
+005D   0491           00186         iorwf   BYTE,1                          ;merge and restore in BYTE
+005E   3008           00187         movlw   D'8'                            ;write D7-D0 to 4094 ...
+005F   008F           00188         movwf   BIT                                     ;... and keep bit-counter in BIT
+0060                  00189 lcd_write_half_1
+0060   1085           00190         bcf             DATA_LCD                        ;make DATA-line '0' ...
+0061   1B91           00191         btfsc   BYTE,7                          ;... but if leftmost bit='1' ...
+0062   1485           00192         bsf             DATA_LCD                        ;... then make DATA-line '1'
+0063   1405           00193         bsf             CLOCK_LCD                       ;give a clock-puls ...
+0064   1005           00194         bcf             CLOCK_LCD                       ;... and make CLOCK '0' again
+0065   0D91           00195         rlf             BYTE,1                          ;move bits in BYTE 1 position to the left
+0066   0B8F           00196         decfsz  BIT,1                           ;repeat until BIT=0
+0067   2860           00197         goto    lcd_write_half_1
+0068   1505           00198         bsf             STROBE_LCD                      ;make STROBE '1' to strobe data into 4094 ...
+0069   1105           00199         bcf             STROBE_LCD                      ;... and make STROBE '0' again
+006A   3002           00200         movlw   D'2'                            ;LCD-module needs 8x5=40 us processing time
+006B   216F           00201         call    WAIT_5us
+006C   0008           00202         return
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  5
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00203 
+                      00204 ;=================================================================================
+006D                  00205 READ_DS1820
+006D   0198           00206         clrf    DS1820_ERROR            ;clear ERROR-code
+006E   2091           00207         call    ONE_WIRE_RESET_AND_PRESENCE
+006F   30CC           00208         movlw   H'CC'                           ;SKIP ROM
+0070   20B0           00209         call    ONE_WIRE_WRITE_BYTE
+0071   3044           00210         movlw   H'44'                           ;CONVERT T
+0072   20B0           00211         call    ONE_WIRE_WRITE_BYTE
+0073                  00212 read_DS1820_1
+0073   0898           00213         movf    DS1820_ERROR,1          ;check DS1820_ERROR and ...
+0074   1D03           00214         btfss   STATUS,Z                        ;... if DS1820_ERROR is not 0 ...
+0075   2890           00215         goto    read_DS1820_2           ;... then stop reading here
+0076   20BF           00216         call    ONE_WIRE_READ_BIT       ;check dataline to find out when ...
+0077   1C10           00217         btfss   DS1820_INPUT_BIT        ;... conversion is ready 
+0078   2873           00218         goto    read_DS1820_1
+0079   2091           00219         call    ONE_WIRE_RESET_AND_PRESENCE
+007A   0898           00220         movf    DS1820_ERROR,1          ;check DS1820_ERROR and ...
+007B   1D03           00221         btfss   STATUS,Z                        ;... if DS1820_ERROR is not 0 ...
+007C   2890           00222         goto    read_DS1820_2           ;... then stop reading here
+007D   30CC           00223         movlw   H'CC'                           ;SKIP ROM
+007E   20B0           00224         call    ONE_WIRE_WRITE_BYTE
+007F   30BE           00225         movlw   H'BE'                           ;READ DATA
+0080   20B0           00226         call    ONE_WIRE_WRITE_BYTE
+0081   0192           00227         clrf    CRC_CHECK                       ;check CRC from here
+0082   20A4           00228         call    ONE_WIRE_READ_BYTE      ;read TEMP
+0083   0097           00229         movwf   DS1820_TEMP
+0084   20A4           00230         call    ONE_WIRE_READ_BYTE      ;read SIGN
+0085   0096           00231         movwf   DS1820_SIGN
+0086   20A4           00232         call    ONE_WIRE_READ_BYTE      ;TH
+0087   20A4           00233         call    ONE_WIRE_READ_BYTE      ;TL
+0088   20A4           00234         call    ONE_WIRE_READ_BYTE      ;FFh
+0089   20A4           00235         call    ONE_WIRE_READ_BYTE      ;FFh
+008A   20A4           00236         call    ONE_WIRE_READ_BYTE      ;REMAIN
+008B   20A4           00237         call    ONE_WIRE_READ_BYTE      ;10h
+008C   20A4           00238         call    ONE_WIRE_READ_BYTE      ;CRC
+008D   0892           00239         movf    CRC_CHECK,1                     ;check CRC_CHECK and ...
+008E   1D03           00240         btfss   STATUS,Z                        ;... if CRC_CHECK not 0 ...
+008F   1518           00241         bsf             DS1820_CRC_ERROR        ;... then set error-code
+0090                  00242 read_DS1820_2
+0090   0008           00243         return
+                      00244 
+                      00245 ;=================================================================================
+0091                  00246 ONE_WIRE_RESET_AND_PRESENCE
+                      00247 ;       part one: dataline low for 480 us (RESET)
+0091   1205           00248         bcf             DATA_DS1820                     ;dataline low
+0092   3060           00249         movlw   D'96'                           ;wait for 96 x 5 us = 480 us
+0093   216F           00250         call    WAIT_5us
+                      00251 ;       part two: release dataline for 70 us and read dataline (PRESENCE)
+0094   1605           00252         bsf             DATA_DS1820                     ;release dataline
+0095   1683           00253         bsf             STATUS,RP0                      ;select BANK 1
+0096   1605           00254         bsf             TRISA,4                         ;define DATA_DS1820 for input ('1')
+0097   1283           00255         bcf             STATUS,RP0                      ;go back to BANK 0
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  6
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+0098   300D           00256         movlw   D'13'                           ;wait for 13 x 5 us = 65 us
+0099   216F           00257         call    WAIT_5us
+009A   1A05           00258         btfsc   DATA_DS1820                     ;if dataline is low ...
+009B   1498           00259         bsf             DS1820_NO_DEVICE        ;... then no device found
+                      00260 ;       part three: releae dataline for 400 us more
+009C   3050           00261         movlw   D'80'                           ;wait for 80 x 5 us = 400 us
+009D   216F           00262         call    WAIT_5us
+009E   1E05           00263         btfss   DATA_DS1820                     ;if dataline is low ...
+009F   1418           00264         bsf             DS1820_SHORTED          ;... then it is shorted to ground
+00A0   1683           00265         bsf             STATUS,RP0                      ;select BANK 1
+00A1   1205           00266         bcf             TRISA,4                         ;redefine DATA_DS1820 for output ('0')
+00A2   1283           00267         bcf             STATUS,RP0                      ;go back to BANK 0
+00A3   0008           00268         return
+                      00269 
+                      00270 ;=================================================================================
+00A4                  00271 ONE_WIRE_READ_BYTE
+00A4   0091           00272         movwf   BYTE                            ;store workspace in BYTE
+00A5   3008           00273         movlw   D'8'                            ;read D0-D7 ...
+00A6   008F           00274         movwf   BIT                                     ;... and follow bit-counter in BIT
+00A7                  00275 one_wire_read_byte_1
+00A7   20BF           00276         call    ONE_WIRE_READ_BIT       ;read next bit in workspace
+00A8   0C91           00277         rrf             BYTE,1                          ;move bits in BYTE 1 position to the right
+00A9   1391           00278         bcf             BYTE,7                          ;clear leftmost bit in BYTE ...
+00AA   1810           00279         btfsc   DS1820_INPUT_BIT        ;... if INPUT_BIT = '1' ...
+00AB   1791           00280         bsf             BYTE,7                          ;... then set leftmost bit in BYTE
+                      00281 ;       repeat for next bit
+00AC   0B8F           00282         decfsz  BIT,1                           ;countdown until BIT=0
+00AD   28A7           00283         goto    one_wire_read_byte_1
+00AE   0811           00284         movf    BYTE,0                          ;put BYTE in workspace
+00AF   0008           00285         return
+                      00286 
+                      00287 ;=================================================================================
+00B0                  00288 ONE_WIRE_WRITE_BYTE
+00B0   0091           00289         movwf   BYTE
+00B1   3008           00290         movlw   D'8'                            ;write D7-D0 ...
+00B2   008F           00291         movwf   BIT                                     ;... en follow bit-counter in BIT
+00B3                  00292 one_wire_write_byte_1
+                      00293 ;       part one: dataline low for 10 us
+00B3   1205           00294         bcf             DATA_DS1820                     ;dataline low
+00B4   3002           00295         movlw   D'2'    
+00B5   216F           00296         call    WAIT_5us                        ;wait for 2 x 5 = 10 us
+                      00297 ;       part two: if you send a '1', then release dataline
+00B6   1811           00298         btfsc   BYTE,0
+00B7   1605           00299         bsf             DATA_DS1820
+                      00300 ;       part three: wait 50 us and finally always release the dataline
+00B8   300A           00301         movlw   D'10'
+00B9   216F           00302         call    WAIT_5us                        ;wait for 10 x 5 = 50 us
+00BA   1605           00303         bsf             DATA_DS1820
+00BB   0C91           00304         rrf             BYTE,1                          ;move bits in BYTE 1 position to the right
+00BC   0B8F           00305         decfsz  BIT,1                           ;countdown until BIT=0
+00BD   28B3           00306         goto    one_wire_write_byte_1
+00BE   0008           00307         return
+                      00308 
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  7
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00309 ;=================================================================================
+00BF                  00310 ONE_WIRE_READ_BIT
+                      00311 ;       part one: dataline low for 5 us
+00BF   1205           00312         bcf             DATA_DS1820                     ;dataline low
+00C0   2176           00313         call    WAIT_4us                        ;wait 4 us more
+                      00314 ;       part two: release dataline during 10 us and read dataline
+00C1   1605           00315         bsf             DATA_DS1820                     ;release dataline
+00C2   1683           00316         bsf             STATUS,RP0                      ;select BANK 1
+00C3   1605           00317         bsf             TRISA,4                         ;define DATA_DS1820 for input ('1')
+00C4   1283           00318         bcf             STATUS,RP0                      ;back to BANK 0
+00C5   2176           00319         call    WAIT_4us
+00C6   0000           00320         nop
+00C7   1010           00321         bcf             DS1820_INPUT_BIT        ;clear input-bit ...
+00C8   1A05           00322         btfsc   DATA_DS1820                     ;... and if DATA is not '0' ...
+00C9   1410           00323         bsf             DS1820_INPUT_BIT        ;... then set input-bit
+                      00324 ;       part three: release dataline 45 us more
+00CA   3007           00325         movlw   D'7'
+00CB   216F           00326         call    WAIT_5us                        ;wait 7 x 5 = 35 us
+00CC   1E05           00327         btfss   DATA_DS1820                     ;if dataline is 0 ...
+00CD   1418           00328         bsf             DS1820_SHORTED          ;... then line is shorted
+00CE   1683           00329         bsf             STATUS,RP0                      ;selectBANK 1
+00CF   1205           00330         bcf             TRISA,4                         ;define DATA_DS1820 back for output ('0')
+00D0   1283           00331         bcf             STATUS,RP0                      ;and back again to BANK 0
+00D1   2152           00332         call    CALCULATE_NEW_CRC       ;update CRC
+00D2   0008           00333         return
+                      00334 
+                      00335 ;=================================================================================
+00D3                  00336 DISPLAY_TEMPERATURE
+00D3   1194           00337         bcf             BACKLIGHT                       ;reset BACKLIGHT and ...
+00D4   1E06           00338         btfss   LDR                                     ;... if LDR = '0' (dark) ...
+00D5   1594           00339         bsf             BACKLIGHT                       ;... then set BACKLIGHT
+                      00340 ;       display headerline
+00D6   2042           00341         call    LCD_START_LINE_1
+00D7   3020           00342         movlw   " "
+00D8   2052           00343         call    LCD_WRITE_CHARACTER
+00D9   3020           00344         movlw   " "
+00DA   2052           00345         call    LCD_WRITE_CHARACTER
+00DB   3054           00346         movlw   "T"
+00DC   2052           00347         call    LCD_WRITE_CHARACTER
+00DD   3045           00348         movlw   "E"
+00DE   2052           00349         call    LCD_WRITE_CHARACTER
+00DF   304D           00350         movlw   "M"
+00E0   2052           00351         call    LCD_WRITE_CHARACTER
+00E1   3050           00352         movlw   "P"
+00E2   2052           00353         call    LCD_WRITE_CHARACTER
+00E3   3045           00354         movlw   "E"
+00E4   2052           00355         call    LCD_WRITE_CHARACTER
+00E5   3052           00356         movlw   "R"
+00E6   2052           00357         call    LCD_WRITE_CHARACTER
+00E7   3041           00358         movlw   "A"
+00E8   2052           00359         call    LCD_WRITE_CHARACTER
+00E9   3054           00360         movlw   "T"
+00EA   2052           00361         call    LCD_WRITE_CHARACTER
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  8
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+00EB   3055           00362         movlw   "U"
+00EC   2052           00363         call    LCD_WRITE_CHARACTER
+00ED   3052           00364         movlw   "R"
+00EE   2052           00365         call    LCD_WRITE_CHARACTER
+00EF   3045           00366         movlw   "E"
+00F0   2052           00367         call    LCD_WRITE_CHARACTER
+                      00368 ;       display temperature
+00F1   2046           00369         call    LCD_START_LINE_2
+00F2   3020           00370         movlw   " "
+00F3   2052           00371         call    LCD_WRITE_CHARACTER
+00F4   3020           00372         movlw   " "
+00F5   2052           00373         call    LCD_WRITE_CHARACTER
+00F6   3020           00374         movlw   " "
+00F7   2052           00375         call    LCD_WRITE_CHARACTER
+00F8   3020           00376         movlw   " "
+00F9   2052           00377         call    LCD_WRITE_CHARACTER
+                      00378 
+                      00379 ;       if negative, then show sign and calculate complement of TEMP
+00FA   0896           00380         movf    DS1820_SIGN,1           ;set STATUS,Z based on contents of SIGN
+00FB   1903           00381         btfsc   STATUS,Z                        ;if SIGN = 0 then skip next code for ...
+00FC   2901           00382         goto    display_temp_1          ;.. negative temperatures
+00FD   302D           00383         movlw   "-"                                     ;display minus-sign on LCD
+00FE   2052           00384         call    LCD_WRITE_CHARACTER
+00FF   0997           00385         comf    DS1820_TEMP,1           ;calculate TEMP's complement and ...
+0100   0A97           00386         incf    DS1820_TEMP,1           ;... add one
+                      00387 
+0101                  00388 display_temp_1
+                      00389 ;       store decimal position in TEMP_HALF and do the integer-division of TEMP
+0101   1090           00390         bcf             DS1820_TEMP_HALF        ;HALF = '0' unless ...
+0102   1817           00391         btfsc   DS1820_TEMP,0           ;... the rightmost bit of TEMP is not '0' ...
+0103   1490           00392         bsf             DS1820_TEMP_HALF        ;... then let HALF = '1'
+0104   0C97           00393         rrf             DS1820_TEMP,1           ;move bits in TEMP 1 position to the right ...
+0105   1397           00394         bcf             DS1820_TEMP,7           ;... and clear the leftmost bit (= TEMP\2)
+                      00395 
+0106                  00396 display_temp_2
+                      00397 ;       find whether TEMP>=100 by subtracting 100 from TEMP and display it if neccesary
+0106   3064           00398         movlw   D'100'                          ;TEMP <- TEMP - 100
+0107   0297           00399         subwf   DS1820_TEMP,1
+0108   1803           00400         btfsc   STATUS,C                        ;if carry-bit clear, then no hundreds
+0109   290E           00401         goto    display_temp_3
+                      00402 ;       TEMP < 100
+010A   3064           00403         movlw   D'100'                          ;TEMP <- TEMP + 100 because we subtracted ...
+010B   0797           00404         addwf   DS1820_TEMP,1           ;... 100 one time too often
+010C   1110           00405         bcf             DS1820_TEMP_100
+010D   2911           00406         goto    display_temp_4
+010E                  00407 display_temp_3
+                      00408 ;       TEMP >= 100
+010E   3031           00409         movlw   "1"
+010F   2052           00410         call    LCD_WRITE_CHARACTER
+0110   1510           00411         bsf             DS1820_TEMP_100
+                      00412 
+0111                  00413 display_temp_4
+                      00414 ;       find decades of temperature and display them
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE  9
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+0111   0193           00415         clrf    DECADES                         ;reset DECADES
+0112                  00416 display_temp_5                                  ;find DECADES by subtracting 10 as often as possible
+0112   300A           00417         movlw   D'10'
+0113   0297           00418         subwf   DS1820_TEMP,1           ;TEMP <- TEMP - 10
+0114   1C03           00419         btfss   STATUS,C                        ;if carry-bit clear, then we went negative
+0115   2918           00420         goto    display_temp_6
+0116   0A93           00421         incf    DECADES,1                       ;increase DECADES with 1
+0117   2912           00422         goto    display_temp_5
+0118                  00423 display_temp_6
+0118   300A           00424         movlw   D'10'                           ;TEMP <- TEMP + 10 because we just added 1 ...
+0119   0797           00425         addwf   DS1820_TEMP,1           ;... one time to often and made TEMP "negative"
+011A   0893           00426         movf    DECADES,1
+011B   1D03           00427         btfss   STATUS,Z
+011C   291F           00428         goto    display_temp_7
+011D   1D10           00429         btfss   DS1820_TEMP_100
+011E   2922           00430         goto    display_temp_8
+011F                  00431 display_temp_7
+011F   3030           00432         movlw   "0"                                     ;convert DECADES to an ASCII-figure
+0120   0713           00433         addwf   DECADES,0                       ;display DECADES of temperature on LCD
+0121   2052           00434         call    LCD_WRITE_CHARACTER
+                      00435 
+0122                  00436 display_temp_8
+                      00437 ;       display units of temperature
+0122   3030           00438         movlw   "0"                                     ;convert remaining units to an ASCII-figure
+0123   0717           00439         addwf   DS1820_TEMP,0           ;show units of temperature on LCD
+0124   2052           00440         call    LCD_WRITE_CHARACTER
+                      00441 
+                      00442 ;       display .0 or .5
+0125   302E           00443         movlw   "."                                     ;display decimal point
+0126   2052           00444         call    LCD_WRITE_CHARACTER
+0127   1890           00445         btfsc   DS1820_TEMP_HALF        ;if TEMP_HALF = "0" then ...
+0128   292C           00446         goto    display_temp_9
+0129   3030           00447         movlw   "0"                                     ;... display "0" ...
+012A   2052           00448         call    LCD_WRITE_CHARACTER
+012B   292E           00449         goto    display_temp_10
+012C                  00450 display_temp_9
+012C   3035           00451         movlw   "5"                                     ;... else display "5"
+012D   2052           00452         call    LCD_WRITE_CHARACTER
+                      00453 
+012E                  00454 display_temp_10
+                      00455 ;       add text "ºC"
+012E   3020           00456         movlw   " "
+012F   2052           00457         call    LCD_WRITE_CHARACTER
+0130   3000           00458         movlw   D'0'                            ;display the symbol for degrees (º) we defined
+0131   2052           00459         call    LCD_WRITE_CHARACTER
+0132   3043           00460         movlw   "C"                                     ;display C for Celcius
+0133   2052           00461         call    LCD_WRITE_CHARACTER
+0134   3020           00462         movlw   " "                                     ;overwrite last position in case temp is shorter
+0135   2052           00463         call    LCD_WRITE_CHARACTER
+0136   0008           00464         return
+                      00465 
+                      00466 ;=================================================================================
+0137                  00467 DISPLAY_ERROR
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE 10
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00468 ;       display headerline
+0137   2046           00469         call    LCD_START_LINE_2
+0138   3020           00470         movlw   " "
+0139   2052           00471         call    LCD_WRITE_CHARACTER
+013A   3020           00472         movlw   " "
+013B   2052           00473         call    LCD_WRITE_CHARACTER
+013C   3045           00474         movlw   "E"
+013D   2052           00475         call    LCD_WRITE_CHARACTER
+013E   3052           00476         movlw   "R"
+013F   2052           00477         call    LCD_WRITE_CHARACTER
+0140   3052           00478         movlw   "R"
+0141   2052           00479         call    LCD_WRITE_CHARACTER
+0142   304F           00480         movlw   "O"
+0143   2052           00481         call    LCD_WRITE_CHARACTER
+0144   3052           00482         movlw   "R"
+0145   2052           00483         call    LCD_WRITE_CHARACTER
+0146   3020           00484         movlw   " "
+0147   2052           00485         call    LCD_WRITE_CHARACTER
+0148   3030           00486         movlw   "0"                                     ;convert ERROR-code to ASCII-character
+0149   0718           00487         addwf   DS1820_ERROR,0
+014A   2052           00488         call    LCD_WRITE_CHARACTER
+014B   3020           00489         movlw   " "
+014C   2052           00490         call    LCD_WRITE_CHARACTER
+014D   3020           00491         movlw   " "
+014E   2052           00492         call    LCD_WRITE_CHARACTER
+014F   3020           00493         movlw   " "
+0150   2052           00494         call    LCD_WRITE_CHARACTER
+0151   0008           00495         return
+                      00496 
+                      00497 ;=================================================================================
+0152                  00498 CALCULATE_NEW_CRC                               ;based on contents of bit in DS1820_INPUT_BIT
+0152   1810           00499         btfsc   DS1820_INPUT_BIT
+0153   2957           00500         goto    CRC_DIGIT_1
+0154                  00501 CRC_DIGIT_0
+0154   1812           00502         btfsc   CRC_CHECK,0
+0155   295D           00503         goto    CRC_DIGIT_NOT_EQUAL
+0156   2959           00504         goto    CRC_DIGIT_EQUAL
+0157                  00505 CRC_DIGIT_1
+0157   1C12           00506         btfss   CRC_CHECK,0
+0158   295D           00507         goto    CRC_DIGIT_NOT_EQUAL
+0159                  00508 CRC_DIGIT_EQUAL
+0159   0C92           00509         rrf             CRC_CHECK,1                     ;move bits in CRC 1 position to right
+015A   307F           00510         movlw   B'01111111'                     ;clear MSB of CRC
+015B   0592           00511         andwf   CRC_CHECK,1
+015C   2962           00512         goto    calculate_new_CRC_end
+015D                  00513 CRC_DIGIT_NOT_EQUAL
+015D   0C92           00514         rrf             CRC_CHECK,1                     ;move bits in CRC 1 position to right
+015E   307F           00515         movlw   B'01111111'                     ;clear MSB of CRC
+015F   0592           00516         andwf   CRC_CHECK,1
+0160   308C           00517         movlw   B'10001100'                     ;XOR bits 2,3 and 7 of CRC
+0161   0692           00518         XORWF   CRC_CHECK,1
+0162                  00519 calculate_new_CRC_end
+0162   0008           00520         return
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE 11
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00521 
+                      00522 ;=================================================================================
+0163                  00523 WAIT_200ms
+                      00524 ;       Wait as many times 200ms as the number in the workspace presents
+0163   008E           00525         movwf   COUNTER_3
+0164                  00526 wait_200ms_1
+0164   30C8           00527         movlw   D'200'
+0165   2169           00528         call    WAIT_1ms
+0166   0B8E           00529         decfsz  COUNTER_3,1
+0167   2964           00530         goto    wait_200ms_1
+0168   0008           00531         return
+                      00532 ;==================
+0169                  00533 WAIT_1ms
+                      00534 ;       Wait as many times 1ms as the number in the workspace presents
+0169   008D           00535         movwf   COUNTER_2
+016A                  00536 wait_1ms_1
+016A   30C8           00537         movlw   D'200'
+016B   216F           00538         call    WAIT_5us
+016C   0B8D           00539         decfsz  COUNTER_2,1
+016D   296A           00540         goto    wait_1ms_1
+016E   0008           00541         return
+                      00542 ;==================
+016F                  00543 WAIT_5us
+                      00544 ;       Wait as many times 5us as the number in the workspace presents
+                      00545 ;       minimum 2x5us, call included
+016F   3EFF           00546         addlw   D'255'
+0170   008C           00547         movwf   COUNTER_1
+0171                  00548 wait_5us_1
+0171   0000           00549         nop
+0172   0000           00550         nop
+0173   0B8C           00551         decfsz  COUNTER_1,1
+0174   2971           00552         goto    wait_5us_1
+0175   0008           00553         return
+                      00554 ;==================
+0176                  00555 WAIT_4us
+                      00556 ;       Wait 4 us (call included)
+0176   0008           00557         return
+                      00558 
+                      00559 ;=================================================================================
+                      00560 
+0177                  00561 THE_END;)
+                      00562         End
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE 12
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+BACKLIGHT                         LCD_BYTE,3
+BIT                               0000000F
+BITS                              00000010
+BYTE                              00000011
+C                                 00000000
+CALCULATE_NEW_CRC                 00000152
+CLOCK_LCD                         PORTA,0
+COUNTER_1                         0000000C
+COUNTER_2                         0000000D
+COUNTER_3                         0000000E
+CRC_CHECK                         00000012
+CRC_DIGIT_0                       00000154
+CRC_DIGIT_1                       00000157
+CRC_DIGIT_EQUAL                   00000159
+CRC_DIGIT_NOT_EQUAL               0000015D
+DATA_DS1820                       PORTA,4
+DATA_LCD                          PORTA,1
+DC                                00000001
+DECADES                           00000013
+DISPLAY_ERROR                     00000137
+DISPLAY_TEMPERATURE               000000D3
+DS1820_CRC_ERROR                  DS1820_ERROR,2
+DS1820_ERROR                      00000018
+DS1820_INPUT_BIT                  BITS,0
+DS1820_NO_DEVICE                  DS1820_ERROR,1
+DS1820_SHORTED                    DS1820_ERROR,0
+DS1820_SIGN                       00000016
+DS1820_TEMP                       00000017
+DS1820_TEMP_100                   BITS,2
+DS1820_TEMP_HALF                  BITS,1
+EEADR                             00000009
+EECON1                            00000088
+EECON2                            00000089
+EEDATA                            00000008
+EEIE                              00000006
+EEIF                              00000004
+F                                 00000001
+FSR                               00000004
+GIE                               00000007
+INDF                              00000000
+INIT                              0000000A
+INTCON                            0000000B
+INTE                              00000004
+INTEDG                            00000006
+INTF                              00000001
+IN_OUT_PORTA                      
+IN_OUT_PORTB                      
+IRP                               00000007
+LCD_1                             LCD_BYTE,1
+LCD_2                             LCD_BYTE,2
+LCD_BYTE                          00000014
+LCD_CLEAR_SCREEN                  0000003C
+LCD_INIT                          00000016
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE 13
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+LCD_START_LINE_1                  00000042
+LCD_START_LINE_2                  00000046
+LCD_START_LINE_3                  0000004A
+LCD_START_LINE_4                  0000004E
+LCD_WRITE_BYTE                    00000055
+LCD_WRITE_CHARACTER               00000052
+LCD_WRITE_HALF                    0000005A
+LDR                               PORTB,4
+MAIN_PROGRAM                      00000001
+MEM_1                             00000015
+NOT_PD                            00000003
+NOT_RBPU                          00000007
+NOT_TO                            00000004
+ONE_WIRE_READ_BIT                 000000BF
+ONE_WIRE_READ_BYTE                000000A4
+ONE_WIRE_RESET_AND_PRESENCE       00000091
+ONE_WIRE_WRITE_BYTE               000000B0
+OPTION_REG                        00000081
+PCL                               00000002
+PCLATH                            0000000A
+PORTA                             00000005
+PORTB                             00000006
+PS0                               00000000
+PS1                               00000001
+PS2                               00000002
+PSA                               00000003
+RA0                               00000000
+RA1                               00000001
+RA2                               00000002
+RA3                               00000003
+RA4                               00000004
+RAM                               0000000C
+RB0                               00000000
+RB1                               00000001
+RB2                               00000002
+RB3                               00000003
+RB4                               00000004
+RB5                               00000005
+RB6                               00000006
+RB7                               00000007
+RBIE                              00000003
+RBIF                              00000000
+RD                                00000000
+READ_DS1820                       0000006D
+RP0                               00000005
+RP1                               00000006
+RS                                LCD_BYTE,0
+STATUS                            00000003
+STROBE_LCD                        PORTA,2
+T0CS                              00000005
+T0IE                              00000005
+T0IF                              00000002
+T0SE                              00000004
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE 14
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+THE_END                           00000177
+TMR0                              00000001
+TMR0IE                            00000005
+TMR0IF                            00000002
+TRISA                             00000085
+TRISA0                            00000000
+TRISA1                            00000001
+TRISA2                            00000002
+TRISA3                            00000003
+TRISA4                            00000004
+TRISB                             00000086
+TRISB0                            00000000
+TRISB1                            00000001
+TRISB2                            00000002
+TRISB3                            00000003
+TRISB4                            00000004
+TRISB5                            00000005
+TRISB6                            00000006
+TRISB7                            00000007
+W                                 00000000
+WAIT_1ms                          00000169
+WAIT_200ms                        00000163
+WAIT_4us                          00000176
+WAIT_5us                          0000016F
+WR                                00000001
+WREN                              00000002
+WRERR                             00000003
+Z                                 00000002
+_CONFIG                           00002007
+_CP_OFF                           00003FFF
+_CP_ON                            0000000F
+_DEVID1                           00002006
+_FOSC_EXTRC                       00003FFF
+_FOSC_HS                          00003FFE
+_FOSC_LP                          00003FFC
+_FOSC_XT                          00003FFD
+_HS_OSC                           00003FFE
+_IDLOC0                           00002000
+_IDLOC1                           00002001
+_IDLOC2                           00002002
+_IDLOC3                           00002003
+_LP_OSC                           00003FFC
+_PWRTE_OFF                        00003FFF
+_PWRTE_ON                         00003FF7
+_RC_OSC                           00003FFF
+_WDTE_OFF                         00003FFB
+_WDTE_ON                          00003FFF
+_WDT_OFF                          00003FFB
+_WDT_ON                           00003FFF
+_XT_OSC                           00003FFD
+__16F84A                          00000001
+__DEBUG                           1
+calculate_new_CRC_end             00000162
+MPASM  5.51                    DS1820_LCD.ASM   6-12-2026  14:24:02         PAGE 15
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+display_temp_1                    00000101
+display_temp_10                   0000012E
+display_temp_2                    00000106
+display_temp_3                    0000010E
+display_temp_4                    00000111
+display_temp_5                    00000112
+display_temp_6                    00000118
+display_temp_7                    0000011F
+display_temp_8                    00000122
+display_temp_9                    0000012C
+lcd_write_half_1                  00000060
+main_0                            00000002
+main_1                            00000008
+one_wire_read_byte_1              000000A7
+one_wire_write_byte_1             000000B3
+read_DS1820_1                     00000073
+read_DS1820_2                     00000090
+wait_1ms_1                        0000016A
+wait_200ms_1                      00000164
+wait_5us_1                        00000171
+
+
+MEMORY USAGE MAP ('X' = Used,  '-' = Unused)
+
+0000 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0040 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0080 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+00C0 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0100 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0140 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXX---------
+2000 : -------X-------- ---------------- ---------------- ----------------
+
+All other memory blocks unused.
+
+Program Memory Words Used:   375
+Program Memory Words Free:   649
+
+
+Errors   :     0
+Warnings :     0 reported,     0 suppressed
+Messages :     0 reported,     6 suppressed
+
+
