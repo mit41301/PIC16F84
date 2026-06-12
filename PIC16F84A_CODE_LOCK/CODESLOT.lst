@@ -1,0 +1,1228 @@
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  1
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00001 ; CODELOCK program
+                      00002 
+                      00003 ;=============================================
+                      00004 ;    HARDWARE
+                      00005 ;=============================================
+                      00006 ; Keyboard connections
+                      00007 ;
+                      00008 ; RB0 = scanline 0
+                      00009 ; RB1 = scanline 1
+                      00010 ; RB2 = scanline 2
+                      00011 ; RB3 = returnline 0
+                      00012 ; RB4 = returnline 1
+                      00013 ; RB5 = returnline 2
+                      00014 ; RB6 = returnline 3
+                      00015 ;(key = 3 x returnline (0,1,2,3) + scanline (0,1,2)
+                      00016 ;
+                      00017 ; RA2 = BEEPER active low
+                      00018 ;
+                      00019      ;RA3 = LED active low
+                      00020 ;
+                      00021 ; RA0 = level output
+                      00022 ; RA1 = pulse output
+                      00023 ;
+                      00024 ;
+                      00025 ;
+                      00026 ;============================================
+                      00027 ; Configuration
+                      00028 ;============================================
+                      00029 
+  00000003            00030 RC      equ     b'11'           ;RC oscillator
+  00000001            00031 XT      equ     b'01'           ;XT oscillator
+  00000004            00032 WDTE    equ     b'100'          ;watchdog timer
+  00000008            00033 PWRTE   equ     b'1000'         ;power up timer
+  00000010            00034 CPOFF   equ     b'10000'        ;code protection
+                      00035 
+                      00036         PROCESSOR       16F84A
+                      00037  include "p16f84a.inc"
+                      00001         LIST
+                      00002 
+                      00003 ;==========================================================================
+                      00004 ;  MPASM PIC16F84A processor include
+                      00005 ; 
+                      00006 ;  (c) Copyright 1999-2013 Microchip Technology, All rights reserved
+                      00007 ;==========================================================================
+                      00008 
+                      00208         LIST
+2007   3FF3           00038         __CONFIG    _FOSC_EXTRC & _CP_OFF & _WDTE_OFF & _PWRTE_ON
+2000   0000 0000 0000 00039         __idlocs        H'0007'
+       0007 
+                      00040  ErrorLevel -302,-305,-225
+                      00041 ;ErrorLevel +302,+305,+225
+                      00042 ;============================================
+                      00043 ; Constants
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  2
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00044 ;============================================
+                      00045 
+                      00046 ;general
+                      00047 
+  00000000            00048 w       equ      0
+  00000001            00049 f       equ      1
+  00000000            00050 indf    equ     00h             ;indirect file
+  00000004            00051 fsr     equ     04h             ;pointer to indirect file
+  0000000C            00052 ram     equ     0ch             ;rambottom (start)
+  00000003            00053 status  equ     03h             ;status register file
+  00000005            00054 porta   equ     05h             ;port A
+  00000006            00055 portb   equ     06h             ;port B
+                      00056 
+  0000000B            00057 intcon  equ     0bh             ;interrupt control register
+  00000000            00058 rbif    equ     00h             ;rb has changed, interrupt event flag
+  00000003            00059 rbie    equ     03h             ;rb interrupt enable flag
+  00000007            00060 gie     equ     07h             ;global interrupt enable flag
+  00000004            00061 inte    equ     04h             ;RB0/INT interrupt enable flag
+  00000001            00062 intf    equ     01h             ;RB0/INT interrupt event flag
+  00000081            00063 optreg  equ     81h             ;option register
+  00000006            00064 intedg  equ     06h             ;INT edge
+                      00065 
+  00000085            00066 trisa   equ     85h             ;port A direction register
+  00000086            00067 trisb   equ     86h             ;port B direction register
+                      00068 
+  00000088            00069 eecon1  equ     88h             ;eeprom control register
+  00000089            00070 eecon2  equ     89h             ;eeprom data control register
+  00000008            00071 eedata  equ     08h             ;eeprom data register
+  00000009            00072 eeadr   equ     09h             ;eeprom adress register
+  00000004            00073 eeif    equ     04h             ;
+  00000003            00074 wrerr   equ     03h             ;
+  00000002            00075 wren    equ     02h             ;
+  00000001            00076 wr      equ     01h             ;
+  00000000            00077 rd      equ     00h             ;
+                      00078 
+  00000005            00079 rp0     equ     05h             ;register bank
+  00000002            00080 zero    equ     02h             ;zero bit position in status register
+  00000000            00081 carry   equ     00h             ;carrybit position in status register
+  00000002            00082 PC      equ     02h             ;program counter register
+                      00083 
+                      00084 ;============================================
+                      00085 ; macro definitions
+                      00086 ;============================================
+                      00087 jz      macro   lab1
+                      00088         btfsc   status,zero
+                      00089         goto    lab1
+                      00090         endm
+                      00091 
+                      00092 jnz     macro   lab2
+                      00093         btfss   status,zero
+                      00094         goto    lab2
+                      00095         endm
+                      00096 
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  3
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00097 jc      macro   lab3
+                      00098         btfsc   status,carry
+                      00099         goto    lab3
+                      00100         endm
+                      00101 
+                      00102 jnc     macro   lab4
+                      00103         btfss   status,carry
+                      00104         goto    lab4
+                      00105         endm
+                      00106 
+                      00107 ;============================================
+                      00108 ; setbank
+                      00109 ;============================================
+                      00110 setbank macro   banknr
+                      00111         if      banknr == 0
+                      00112         bcf     status,rp0
+                      00113         endif
+                      00114         if      banknr == 1
+                      00115         bsf     status,rp0
+                      00116         endif
+                      00117         endm
+                      00118 
+                      00119 ;============================================
+                      00120 ; portio
+                      00121 ;
+                      00122 ; sets tris of port
+                      00123 ; usage: portio   porta,b'10010011'  ;example
+                      00124 ; 0 is output, 1 is input
+                      00125 ;============================================
+                      00126 portio  macro   portnr,io
+                      00127         clrf    portnr
+                      00128         setbank 1
+                      00129         movlw   io
+                      00130         if      portnr == porta
+                      00131         movwf   trisa
+                      00132         endif
+                      00133         if      portnr == portb
+                      00134         movwf   trisb
+                      00135         endif
+                      00136         setbank 0
+                      00137         endm
+                      00138 
+                      00139 
+                      00140 ;============================================
+                      00141 ; program constants
+                      00142 ;============================================
+                      00143 
+  000000FF            00144 nokey   equ     0ffh
+  0000000C            00145 hekje   equ     .12
+  0000000A            00146 sterretje       equ     .10
+                      00147 
+                      00148 ;============================================
+                      00149 ; variables
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  4
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00150 ;============================================
+000C                  00151         org     ram
+                      00152 
+  0000000C            00153 del0    equ     ram+0
+  0000000D            00154 del1    equ     ram+1
+  0000000E            00155 del10   equ     ram+2
+  0000000F            00156 scanln  equ     ram+3
+  00000010            00157 retval  equ     ram+4
+  00000011            00158 retln   equ     ram+5
+  00000012            00159 key     equ     ram+6
+  00000013            00160 scankey equ     ram+7
+  00000014            00161 newkey  equ     ram+8
+  00000015            00162 digit   equ     ram+9
+  00000016            00163 match   equ     ram+0Ah
+                      00164 
+  00000017            00165 ncode0  equ     ram+0Bh
+  00000018            00166 ncode1  equ     ram+0Ch
+  00000019            00167 ncode2  equ     ram+0Dh
+  0000001A            00168 ncode3  equ     ram+0Eh
+  0000001B            00169 ncode4  equ     ram+0Fh
+  0000001C            00170 ncode5  equ     ram+10h
+                      00171 
+  0000001D            00172 tries   equ     ram+11h
+                      00173 
+                      00174 ;last ram locatation = ram + 23h
+                      00175 
+                      00176 ;============================================
+                      00177 ; reset addres
+                      00178 ;============================================
+0000                  00179         org     0
+0000   28B9           00180         goto    start
+                      00181 
+                      00182 ;============================================
+                      00183 ; identify interrupt source
+                      00184 ;============================================
+0004                  00185         org     4
+0004   2816           00186         goto    interrupt
+                      00187 
+                      00188 ;============================================
+                      00189 ; rdeeprom
+                      00190 ; reads byte from eeprom
+                      00191 ; entry EEADR, exit EEDATA
+                      00192 ;============================================
+0005                  00193 rdeeprom:
+0005   1683           00194         bsf     status,rp0
+0006   1408           00195         bsf     eecon1,rd
+0007   1283           00196         bcf     status,rp0
+                      00197 
+0008   0008           00198         return
+                      00199 
+                      00200 
+                      00201 ;============================================
+                      00202 ; wreeprom
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  5
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00203 ;
+                      00204 ; writes a byte of data to eeprom
+                      00205 ;
+                      00206 ; entry: eedata,eeadr
+                      00207 ;============================================
+0009                  00208 wreeprom:
+                      00209 
+0009   138B           00210         bcf     intcon,gie      ;disable ints
+000A   1683           00211         bsf     status,rp0      ;bank 1
+000B   1508           00212         bsf     eecon1,wren      ;enable write
+                      00213 
+                      00214         ;write sequence
+                      00215 
+000C   3055           00216         movlw   55h
+000D   0089           00217         movwf   eecon2
+000E   30AA           00218         movlw   0aah
+000F   0089           00219         movwf   eecon2
+0010   1488           00220         bsf     eecon1,wr        ;begin write
+                      00221 
+0011                  00222 waitwr:
+0011   1888           00223         btfsc   eecon1,wr
+0012   2811           00224         goto    waitwr          ;wait for writecycle complete
+                      00225 
+0013   1283           00226         bcf     status,rp0      ;bank 0
+0014   178B           00227         bsf     intcon,gie      ;reenable ints
+                      00228 
+0015   0008           00229         return
+                      00230 
+                      00231 
+                      00232 ;============================================
+                      00233 ; interrupt routines
+                      00234 ;============================================
+0016                  00235 interrupt:
+0016   0009           00236         retfie
+                      00237 
+                      00238 ;============================================
+                      00239 ;
+                      00240 ;============================================
+                      00241 ;============================================
+                      00242 ; Init
+                      00243 ;============================================
+0017                  00244 init:
+                      00245         portio  porta,b'00000'
+0017   0185               M         clrf    porta
+                          M         setbank 1
+                          M         if      1      == 0
+                          M         bcf     status,rp0
+                          M         endif
+                          M         if      1      == 1
+0018   1683               M         bsf     status,rp0
+                          M         endif
+0019   3000               M         movlw   b'00000'
+                          M         if      porta  == porta
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  6
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+001A   0085               M         movwf   trisa
+                          M         endif
+                          M         if      porta  == portb
+                          M         movwf   trisb
+                          M         endif
+                          M         setbank 0
+                          M         if      0      == 0
+001B   1283               M         bcf     status,rp0
+                          M         endif
+                          M         if      0      == 1
+                          M         bsf     status,rp0
+                          M         endif
+                      00246         portio  portb,b'11111000'
+001C   0186               M         clrf    portb
+                          M         setbank 1
+                          M         if      1      == 0
+                          M         bcf     status,rp0
+                          M         endif
+                          M         if      1      == 1
+001D   1683               M         bsf     status,rp0
+                          M         endif
+001E   30F8               M         movlw   b'11111000'
+                          M         if      portb  == porta
+                          M         movwf   trisa
+                          M         endif
+                          M         if      portb  == portb
+001F   0086               M         movwf   trisb
+                          M         endif
+                          M         setbank 0
+                          M         if      0      == 0
+0020   1283               M         bcf     status,rp0
+                          M         endif
+                          M         if      0      == 1
+                          M         bsf     status,rp0
+                          M         endif
+                      00247 
+0021   1005           00248         bcf     porta,0         ;clear level output
+0022   1085           00249         bcf     porta,1         ;clear pulse output
+                      00250 
+0023   1505           00251         bsf     porta,2         ;beeper off
+                      00252 
+                      00253 ;       bsf     porta,3         ;led off
+                      00254 
+0024   3007           00255         movlw   7h
+0025   0086           00256         movwf   portb           ;set keyboard scanlines
+                      00257 
+0026   3001           00258         movlw   1
+0027   0094           00259         movwf   newkey
+                      00260 
+0028   019D           00261         clrf    tries
+                      00262 
+                      00263         ;test if signature is written in EEPROM
+                      00264         ;if not then write signature and initial code
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  7
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00265         ;else do nothing
+                      00266         ;signature = AAh,55h,CCh, initial accescode = 1 2 3 4 5 6
+                      00267 
+0029   3006           00268         movlw   6
+002A   0089           00269         movwf   eeadr           ;first signature adress
+002B   2005           00270         call    rdeeprom
+002C   30AA           00271         movlw   0AAh
+002D   0208           00272         subwf   eedata,w
+                      00273         jnz     nosig
+002E   1D03               M         btfss   status,zero
+002F   283D               M         goto    nosig
+                      00274 
+0030   0A89           00275         incf    eeadr
+0031   2005           00276         call    rdeeprom
+0032   3055           00277         movlw   055h
+0033   0208           00278         subwf   eedata,w
+                      00279         jnz     nosig
+0034   1D03               M         btfss   status,zero
+0035   283D               M         goto    nosig
+                      00280 
+0036   0A89           00281         incf    eeadr
+0037   2005           00282         call    rdeeprom
+0038   30CC           00283         movlw   0CCh
+0039   0208           00284         subwf   eedata,w
+                      00285         jnz     nosig
+003A   1D03               M         btfss   status,zero
+003B   283D               M         goto    nosig
+                      00286 
+                      00287         ;signature match, do nothing
+003C   0008           00288         return
+003D                  00289 nosig:
+                      00290         ;no valid signature (first startup), write signature and accescode
+                      00291 
+003D   0189           00292         clrf    eeadr
+003E   3001           00293         movlw   1
+003F   0088           00294         movwf   eedata
+0040                  00295 wrcod:
+0040   2009           00296         call    wreeprom
+0041   0A88           00297         incf    eedata
+0042   0A89           00298         incf    eeadr
+0043   3006           00299         movlw   6
+0044   0209           00300         subwf   eeadr,w
+                      00301         jnz     wrcod
+0045   1D03               M         btfss   status,zero
+0046   2840               M         goto    wrcod
+                      00302 
+                      00303         ;code written, write signature
+                      00304 
+0047   30AA           00305         movlw   0AAh
+0048   0088           00306         movwf   eedata
+0049   2009           00307         call    wreeprom
+004A   0A89           00308         incf    eeadr
+                      00309 
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  8
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+004B   3055           00310         movlw   055h
+004C   0088           00311         movwf   eedata
+004D   2009           00312         call    wreeprom
+004E   0A89           00313         incf    eeadr
+                      00314 
+004F   30CC           00315         movlw   0CCh
+0050   0088           00316         movwf   eedata
+0051   2009           00317         call    wreeprom
+                      00318 
+0052   0008           00319         return
+                      00320 
+                      00321 ;============================================
+                      00322 ; beep
+                      00323 ; beeps 50mS
+                      00324 ;============================================
+0053                  00325 beep:
+0053   1105           00326         bcf     porta,2
+0054   3005           00327         movlw   .5
+0055   008E           00328         movwf   del10
+0056   2059           00329         call    delay10
+0057   1505           00330         bsf     porta,2
+                      00331 
+0058   0008           00332         return
+                      00333 
+                      00334 ;============================================
+                      00335 ; delay10
+                      00336 ; delays del10 x 10mS
+                      00337 ;============================================
+0059                  00338 delay10:
+                      00339         ;delayloop 10 mS
+0059   3028           00340         movlw   .40
+005A   008D           00341         movwf   del1
+005B                  00342 dec250u:
+                      00343         ;delayloop 250 uS
+005B   3053           00344         movlw   .83
+005C   008C           00345         movwf   del0
+005D                  00346 dec1u:
+005D   0B8C           00347         decfsz  del0
+005E   285D           00348         goto    dec1u
+                      00349 
+005F   0B8D           00350         decfsz  del1
+0060   285B           00351         goto    dec250u
+                      00352 
+0061   0B8E           00353         decfsz  del10
+0062   2859           00354         goto    delay10
+                      00355 
+0063   0008           00356         return
+                      00357 ;============================================
+                      00358 delay   macro   dly00
+                      00359         movlw   dly00
+                      00360         movwf   del10
+                      00361         call    delay10
+                      00362         endm
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE  9
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00363 
+                      00364 ;============================================
+                      00365 ; scankeyboard
+                      00366 ; scans the keyboard
+                      00367 ; returns scankey = 1..12, 0ffh = nokey
+                      00368 ; scankey is nokey if no key is pressed
+                      00369 ; scanlines = RB0..RB2
+                      00370 ; returnlines = RB3..RB6
+                      00371 ;============================================
+0064                  00372 scankeyboard:
+                      00373 
+                      00374         ;find scanline
+                      00375 
+0064   3000           00376         movlw   0
+0065   0086           00377         movwf   portb
+0066   018F           00378         clrf    scanln
+0067   1406           00379         bsf     portb,0
+0068   0000           00380         nop
+0069   0806           00381         movf    portb,w
+006A   3978           00382         andlw   b'01111000'
+                      00383         jnz     retl
+006B   1D03               M         btfss   status,zero
+006C   287C               M         goto    retl
+006D   0A8F           00384         incf    scanln
+006E   1486           00385         bsf     portb,1
+006F   0000           00386         nop
+0070   0806           00387         movf    portb,w
+0071   3978           00388         andlw   b'01111000'
+                      00389         jnz     retl
+0072   1D03               M         btfss   status,zero
+0073   287C               M         goto    retl
+0074   0A8F           00390         incf    scanln
+0075   1506           00391         bsf     portb,2
+0076   0000           00392         nop
+0077   0806           00393         movf    portb,w
+0078   3978           00394         andlw   b'01111000'
+                      00395         jnz     retl
+0079   1D03               M         btfss   status,zero
+007A   287C               M         goto    retl
+007B   288B           00396         goto    nokeyp          ;no keypress
+                      00397 
+                      00398         ;scanline found, find returnline
+007C                  00399 retl:
+007C   0191           00400         clrf    retln
+007D   0806           00401         movf    portb,w
+007E   0090           00402         movwf   retval
+007F   0C90           00403         rrf     retval
+0080   0C90           00404         rrf     retval
+0081   0C90           00405         rrf     retval
+0082                  00406 nxtrl:
+0082   1003           00407         bcf     status,carry
+0083   0C90           00408         rrf     retval
+                      00409         jc      keyfound
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 10
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+0084   1803               M         btfsc   status,carry
+0085   288E               M         goto    keyfound
+0086   0A91           00410         incf    retln
+0087   3004           00411         movlw   4
+0088   0211           00412         subwf   retln,w
+                      00413         jnz     nxtrl
+0089   1D03               M         btfss   status,zero
+008A   2882               M         goto    nxtrl
+                      00414 
+                      00415         ;no (new) key pressed, exit
+008B                  00416 nokeyp:
+008B   30FF           00417         movlw   nokey
+008C   0093           00418         movwf   scankey
+008D   0008           00419         return
+                      00420 
+008E                  00421 keyfound:
+                      00422 
+                      00423         ;key found, calculate keynumber = 3x RL + SL + 1
+008E   0811           00424         movf    retln,w
+008F   1003           00425         bcf     status,carry
+0090   0D91           00426         rlf     retln           ;2x
+0091   0791           00427         addwf   retln,f         ;3x
+0092   080F           00428         movf    scanln,w
+0093   0711           00429         addwf   retln,w
+0094   0093           00430         movwf   scankey
+                      00431 
+0095   0A93           00432         incf    scankey
+                      00433 
+0096   0008           00434         return
+                      00435 
+                      00436 ;============================================
+                      00437 ; getkey
+                      00438 ; exits key:1..12,nokey
+                      00439 ; debounced filtered output
+                      00440 ;============================================
+0097                  00441 getkey:
+0097   2064           00442         call    scankeyboard
+0098   0813           00443         movf    scankey,w
+0099   0092           00444         movwf   key
+009A   3002           00445         movlw   .2
+009B   008E           00446         movwf   del10
+009C   2001           00447         call    delay        ;delay 20mS
+009D   2064           00448         call    scankeyboard
+009E   0813           00449         movf    scankey,w
+009F   0212           00450         subwf   key,w
+                      00451         jnz     getkey
+00A0   1D03               M         btfss   status,zero
+00A1   2897               M         goto    getkey
+                      00452 
+                      00453         ;debounce complete
+                      00454 
+                      00455         ;test if the key is a new keypress, if not return nokey=0ffh
+                      00456 
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 11
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+00A2   30FF           00457         movlw   nokey
+00A3   0212           00458         subwf   key,w
+                      00459         jnz     exitkey
+00A4   1D03               M         btfss   status,zero
+00A5   28A9               M         goto    exitkey
+00A6   3001           00460         movlw   1
+00A7   0094           00461         movwf   newkey          ;next key is new
+00A8   28AF           00462         goto    pkey
+                      00463 
+00A9                  00464 exitkey:
+00A9   3001           00465         movlw   1
+00AA   0214           00466         subwf   newkey,w
+                      00467         jnz     pkey
+00AB   1D03               M         btfss   status,zero
+00AC   28AF               M         goto    pkey
+00AD   0194           00468         clrf    newkey
+00AE   0008           00469         return
+                      00470 
+00AF                  00471 pkey:   ;exit nokey
+00AF   30FF           00472         movlw   nokey
+00B0   0092           00473         movwf   key
+00B1   0008           00474         return
+                      00475 ;============================================
+                      00476 ; readkey
+                      00477 ; reads keyboard until key pressed
+                      00478 ; exits key = 1..12
+                      00479 ;============================================
+00B2                  00480 readkey:
+00B2   2097           00481         call    getkey
+00B3   30FF           00482         movlw   nokey
+00B4   0212           00483         subwf   key,w
+                      00484         jz      readkey
+00B5   1903               M         btfsc   status,zero
+00B6   28B2               M         goto    readkey
+00B7   2053           00485         call    beep
+                      00486 
+00B8   0008           00487         return
+                      00488 
+                      00489 ;============================================
+                      00490 ; main program
+                      00491 ;============================================
+00B9                  00492 start:
+00B9   2017           00493         call    init
+00BA   2053           00494         call    beep
+                      00495 
+00BB                  00496 rdkey:
+00BB   20B2           00497         call    readkey         ;wait for key
+                      00498 
+                      00499         ;key pressed
+                      00500 
+00BC   300A           00501         movlw   sterretje
+00BD   0212           00502         subwf   key,w
+                      00503         jnz     rdkey
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 12
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+00BE   1D03               M         btfss   status,zero
+00BF   28BB               M         goto    rdkey
+                      00504 
+                      00505         ; '*' pressed
+                      00506 
+00C0                  00507 nxkey0:
+00C0   20B2           00508         call    readkey
+                      00509 
+                      00510         ;find out if second key is a number, '*' or '#'
+                      00511 
+00C1   300A           00512         movlw   sterretje
+00C2   0212           00513         subwf   key,w
+                      00514         jz      deactivate      ;'**' pressed, deactivate ouput, restart input
+00C3   1903               M         btfsc   status,zero
+00C4   28E2               M         goto    deactivate
+                      00515 
+00C5   300C           00516         movlw   hekje
+00C6   0212           00517         subwf   key,w
+                      00518         jz      getcode         ;'*#' goto new code input
+00C7   1903               M         btfsc   status,zero
+00C8   2912               M         goto    getcode
+                      00519 
+                      00520         ;'*number' pressed, read code, key holds first digit
+                      00521 
+00C9   3006           00522         movlw   6
+00CA   0095           00523         movwf   digit           ;digit count, 6
+00CB   3001           00524         movlw   1
+00CC   0096           00525         movwf   match           ;code match to input flag
+00CD   0189           00526         clrf    eeadr           ;start with eeprom adress 0
+00CE                  00527 rdee:
+00CE   2005           00528         call    rdeeprom
+00CF   0808           00529         movf    eedata,w
+00D0   0212           00530         subwf   key,w           ;compare stored codedigit to key
+                      00531         jz      eq00
+00D1   1903               M         btfsc   status,zero
+00D2   28D4               M         goto    eq00
+00D3   0196           00532         clrf    match
+00D4                  00533 eq00:
+00D4   0B95           00534         decfsz  digit
+00D5   28E4           00535         goto    nxtdg00
+                      00536 
+                      00537         ;6 digits compared
+00D6   1C16           00538         btfss   match,0
+00D7   28EF           00539         goto    nomatch0          ;no match, do nothing, return to input start
+                      00540 
+                      00541         ;codes match, set outputs
+00D8   019D           00542         clrf    tries
+00D9   1405           00543         bsf     porta,0         ;set level
+                      00544 ;        bcf     porta,3         ;LED on
+                      00545 
+                      00546 
+                      00547         ;pulse 1 sec
+                      00548         ;beep 1 sec
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 13
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+00DA   1105           00549         bcf     porta,2
+00DB   1485           00550         bsf     porta,1         ;set pulse
+                      00551         delay   .100
+00DC   3064               M         movlw   .100
+00DD   008E               M         movwf   del10
+00DE   2059               M         call    delay10
+00DF   1085           00552         bcf     porta,1
+00E0   1505           00553         bsf     porta,2
+                      00554 
+00E1   28BB           00555         goto    rdkey
+                      00556 
+00E2                  00557 deactivate:
+00E2   1005           00558         bcf     porta,0         ;deactivate output
+                      00559 ;        bsf     porta,3         ;LED off
+00E3   28C0           00560         goto    nxkey0
+                      00561 
+00E4                  00562 nxtdg00:
+00E4   20B2           00563         call    readkey         ;wait for key
+                      00564 
+                      00565         ;key pressed
+00E5   300A           00566         movlw   sterretje
+00E6   0212           00567         subwf   key,w
+                      00568         jz      nxkey0          ;restart input
+00E7   1903               M         btfsc   status,zero
+00E8   28C0               M         goto    nxkey0
+                      00569 
+00E9   300C           00570         movlw   hekje
+00EA   0212           00571         subwf   key,w
+                      00572         jz      rdkey           ;restart input
+00EB   1903               M         btfsc   status,zero
+00EC   28BB               M         goto    rdkey
+                      00573 
+                      00574         ;digit pressed
+00ED   0A89           00575         incf    eeadr
+00EE   28CE           00576         goto    rdee
+                      00577 
+00EF                  00578 nomatch0:
+                      00579         ;wrong accescode entry
+00EF   0A9D           00580         incf    tries
+00F0   3004           00581         movlw   4
+00F1   021D           00582         subwf   tries,w
+                      00583         jnz     nomatch
+00F2   1D03               M         btfss   status,zero
+00F3   2905               M         goto    nomatch
+                      00584 
+                      00585         ;four times mismatch in a row
+                      00586         ;alarm for 1 minute
+00F4   303C           00587         movlw   .60
+00F5   0095           00588         movwf   digit
+                      00589 
+00F6                  00590 alarm:
+00F6   2053           00591         call    beep            ;50mS
+                      00592         delay   .15             ;150ms
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 14
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+00F7   300F               M         movlw   .15
+00F8   008E               M         movwf   del10
+00F9   2059               M         call    delay10
+00FA   2053           00593         call    beep            ;50
+                      00594         delay   .15             ;150
+00FB   300F               M         movlw   .15
+00FC   008E               M         movwf   del10
+00FD   2059               M         call    delay10
+00FE   2053           00595         call    beep            ;50
+                      00596         delay   .55             ;550mS
+00FF   3037               M         movlw   .55
+0100   008E               M         movwf   del10
+0101   2059               M         call    delay10
+                      00597 
+0102   0B95           00598         decfsz  digit
+0103   28F6           00599         goto    alarm
+0104   28BB           00600         goto    rdkey
+                      00601 
+0105                  00602 nomatch:
+                      00603         ;beep 3x
+                      00604         delay   .30
+0105   301E               M         movlw   .30
+0106   008E               M         movwf   del10
+0107   2059               M         call    delay10
+0108   2053           00605         call    beep
+                      00606         delay   .10
+0109   300A               M         movlw   .10
+010A   008E               M         movwf   del10
+010B   2059               M         call    delay10
+010C   2053           00607         call    beep
+                      00608         delay   .10
+010D   300A               M         movlw   .10
+010E   008E               M         movwf   del10
+010F   2059               M         call    delay10
+0110   2053           00609         call    beep
+                      00610 
+0111   28BB           00611         goto    rdkey
+                      00612 
+0112                  00613 getcode:
+                      00614         ;'*#' pressed, get new accescode
+                      00615         ;format = '*#ooooonnnnnmmmmm'
+                      00616         ;o = oldcode,n = newcode, m = newcode verification
+                      00617 
+                      00618         ;read and verify the old code
+0112   3001           00619         movlw   1
+0113   0096           00620         movwf   match
+0114   3006           00621         movlw   6
+0115   0095           00622         movwf   digit
+0116   0189           00623         clrf    eeadr
+                      00624 
+                      00625         ;read digit and verify
+0117                  00626 gtdg00:
+0117   20B2           00627         call    readkey         ;wait for key
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 15
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+0118   300A           00628         movlw   sterretje
+0119   0212           00629         subwf   key,w
+                      00630         jz      nxkey0          ;'*' pressed, restart input
+011A   1903               M         btfsc   status,zero
+011B   28C0               M         goto    nxkey0
+                      00631 
+011C   300C           00632         movlw   hekje
+011D   0212           00633         subwf   key,w
+                      00634         jz      nomatch         ;error in input
+011E   1903               M         btfsc   status,zero
+011F   2905               M         goto    nomatch
+                      00635 
+                      00636         ;digit pressed, compare to eeprom
+                      00637 
+0120   2005           00638         call    rdeeprom
+0121   0812           00639         movf    key,w
+0122   0288           00640         subwf   eedata
+                      00641         jz      match00
+0123   1903               M         btfsc   status,zero
+0124   2926               M         goto    match00
+0125   0196           00642         clrf    match           ;mismatch in input
+0126                  00643 match00:
+0126   0A89           00644         incf    eeadr
+0127   0B95           00645         decfsz  digit
+0128   2917           00646         goto    gtdg00          ;read next
+                      00647 
+                      00648 
+                      00649         ;read and save new accescode
+                      00650 
+0129   3006           00651         movlw   6
+012A   0095           00652         movwf   digit
+012B   3017           00653         movlw   ncode0
+012C   0084           00654         movwf   fsr             ;point to first digit
+                      00655 
+012D                  00656 rdnc00:
+012D   20B2           00657         call    readkey         ;wait for key
+012E   300A           00658         movlw   sterretje
+012F   0212           00659         subwf   key,w
+                      00660         jz      nxkey0          ;'*' pressed, restart input
+0130   1903               M         btfsc   status,zero
+0131   28C0               M         goto    nxkey0
+                      00661 
+0132   300C           00662         movlw   hekje
+0133   0212           00663         subwf   key,w
+                      00664         jz      nomatch         ;error in input
+0134   1903               M         btfsc   status,zero
+0135   2905               M         goto    nomatch
+                      00665 
+0136   0812           00666         movf    key,w
+0137   0080           00667         movwf   indf
+                      00668 
+0138   0A84           00669         incf    fsr
+0139   0B95           00670         decfsz  digit
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 16
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+013A   292D           00671         goto    rdnc00
+                      00672 
+                      00673         ;new code saved
+                      00674         ;read verification of newcode and compare
+                      00675 
+013B   3006           00676         movlw   6
+013C   0095           00677         movwf   digit
+013D   3017           00678         movlw   ncode0
+013E   0084           00679         movwf   fsr             ;point to saved code
+                      00680 
+013F                  00681 rdvc00:
+013F   20B2           00682         call    readkey         ;wait for key
+0140   300A           00683         movlw   sterretje
+0141   0212           00684         subwf   key,w
+                      00685         jz      nxkey0          ;'*' pressed, restart input
+0142   1903               M         btfsc   status,zero
+0143   28C0               M         goto    nxkey0
+                      00686 
+0144   300C           00687         movlw   hekje
+0145   0212           00688         subwf   key,w
+                      00689         jz      nomatch         ;error in input
+0146   1903               M         btfsc   status,zero
+0147   2905               M         goto    nomatch
+                      00690 
+0148   0800           00691         movf    indf,w
+0149   0212           00692         subwf   key,w
+                      00693         jz      mok
+014A   1903               M         btfsc   status,zero
+014B   294D               M         goto    mok
+014C   0196           00694         clrf    match           ;key and saved digit differ, no match
+                      00695 
+014D                  00696 mok:
+014D   0A84           00697         incf    fsr
+014E   0B95           00698         decfsz  digit
+014F   293F           00699         goto    rdvc00
+                      00700 
+                      00701         ;new code verified, test if matched
+                      00702 
+0150   1C16           00703         btfss   match,0
+0151   2905           00704         goto    nomatch         ;input mismatch, error signal, restart input
+                      00705 
+                      00706         ;codes match, store new code in eeprom
+                      00707 
+                      00708         ;long beep
+0152   1105           00709         bcf     porta,2
+                      00710         delay   .100
+0153   3064               M         movlw   .100
+0154   008E               M         movwf   del10
+0155   2059               M         call    delay10
+0156   1505           00711         bsf     porta,2
+                      00712 
+0157   3006           00713         movlw   6
+0158   0095           00714         movwf   digit
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 17
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+0159   3017           00715         movlw   ncode0
+015A   0084           00716         movwf   fsr
+015B   0189           00717         clrf    eeadr
+                      00718 
+015C                  00719 store00:
+015C   0800           00720         movf    indf,w
+015D   0088           00721         movwf   eedata
+015E   2009           00722         call    wreeprom
+                      00723 
+015F   0A84           00724         incf    fsr
+0160   0A89           00725         incf    eeadr
+0161   0B95           00726         decfsz  digit
+0162   295C           00727         goto    store00
+                      00728 
+0163   28BB           00729         goto    rdkey           ;new code stored in eeprom, restart input
+                      00730 
+                      00731 ;============================================
+                      00732 ; eeprom definition
+                      00733 ;============================================
+2100                  00734         org     2100h
+                      00735 
+2100   0000 0000 0000 00736         de      0,0,0,0,0,0,0,0,0
+       0000 0000 0000 
+       0000 0000 0000 
+                      00737 
+                      00738 
+                      00739 
+                      00740         end
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 18
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+C                                 00000000
+CPOFF                             00000010
+DC                                00000001
+EEADR                             00000009
+EECON1                            00000088
+EECON2                            00000089
+EEDATA                            00000008
+EEIE                              00000006
+EEIF                              00000004
+F                                 00000001
+FSR                               00000004
+GIE                               00000007
+INDF                              00000000
+INTCON                            0000000B
+INTE                              00000004
+INTEDG                            00000006
+INTF                              00000001
+IRP                               00000007
+NOT_PD                            00000003
+NOT_RBPU                          00000007
+NOT_TO                            00000004
+OPTION_REG                        00000081
+PC                                00000002
+PCL                               00000002
+PCLATH                            0000000A
+PORTA                             00000005
+PORTB                             00000006
+PS0                               00000000
+PS1                               00000001
+PS2                               00000002
+PSA                               00000003
+PWRTE                             00000008
+RA0                               00000000
+RA1                               00000001
+RA2                               00000002
+RA3                               00000003
+RA4                               00000004
+RB0                               00000000
+RB1                               00000001
+RB2                               00000002
+RB3                               00000003
+RB4                               00000004
+RB5                               00000005
+RB6                               00000006
+RB7                               00000007
+RBIE                              00000003
+RBIF                              00000000
+RC                                00000003
+RD                                00000000
+RP0                               00000005
+RP1                               00000006
+STATUS                            00000003
+T0CS                              00000005
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 19
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+T0IE                              00000005
+T0IF                              00000002
+T0SE                              00000004
+TMR0                              00000001
+TMR0IE                            00000005
+TMR0IF                            00000002
+TRISA                             00000085
+TRISA0                            00000000
+TRISA1                            00000001
+TRISA2                            00000002
+TRISA3                            00000003
+TRISA4                            00000004
+TRISB                             00000086
+TRISB0                            00000000
+TRISB1                            00000001
+TRISB2                            00000002
+TRISB3                            00000003
+TRISB4                            00000004
+TRISB5                            00000005
+TRISB6                            00000006
+TRISB7                            00000007
+W                                 00000000
+WDTE                              00000004
+WR                                00000001
+WREN                              00000002
+WRERR                             00000003
+XT                                00000001
+Z                                 00000002
+_CONFIG                           00002007
+_CP_OFF                           00003FFF
+_CP_ON                            0000000F
+_DEVID1                           00002006
+_FOSC_EXTRC                       00003FFF
+_FOSC_HS                          00003FFE
+_FOSC_LP                          00003FFC
+_FOSC_XT                          00003FFD
+_HS_OSC                           00003FFE
+_IDLOC0                           00002000
+_IDLOC1                           00002001
+_IDLOC2                           00002002
+_IDLOC3                           00002003
+_LP_OSC                           00003FFC
+_PWRTE_OFF                        00003FFF
+_PWRTE_ON                         00003FF7
+_RC_OSC                           00003FFF
+_WDTE_OFF                         00003FFB
+_WDTE_ON                          00003FFF
+_WDT_OFF                          00003FFB
+_WDT_ON                           00003FFF
+_XT_OSC                           00003FFD
+__16F84A                          00000001
+__DEBUG                           1
+alarm                             000000F6
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 20
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+beep                              00000053
+carry                             00000000
+deactivate                        000000E2
+dec1u                             0000005D
+dec250u                           0000005B
+del0                              0000000C
+del1                              0000000D
+del10                             0000000E
+delay                             
+delay10                           00000059
+digit                             00000015
+eeadr                             00000009
+eecon1                            00000088
+eecon2                            00000089
+eedata                            00000008
+eeif                              00000004
+eq00                              000000D4
+exitkey                           000000A9
+f                                 00000001
+fsr                               00000004
+getcode                           00000112
+getkey                            00000097
+gie                               00000007
+gtdg00                            00000117
+hekje                             0000000C
+indf                              00000000
+init                              00000017
+intcon                            0000000B
+inte                              00000004
+intedg                            00000006
+interrupt                         00000016
+intf                              00000001
+jc                                
+jnc                               
+jnz                               
+jz                                
+key                               00000012
+keyfound                          0000008E
+match                             00000016
+match00                           00000126
+mok                               0000014D
+ncode0                            00000017
+ncode1                            00000018
+ncode2                            00000019
+ncode3                            0000001A
+ncode4                            0000001B
+ncode5                            0000001C
+newkey                            00000014
+nokey                             000000FF
+nokeyp                            0000008B
+nomatch                           00000105
+nomatch0                          000000EF
+nosig                             0000003D
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 21
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+nxkey0                            000000C0
+nxtdg00                           000000E4
+nxtrl                             00000082
+optreg                            00000081
+pkey                              000000AF
+porta                             00000005
+portb                             00000006
+portio                            
+ram                               0000000C
+rbie                              00000003
+rbif                              00000000
+rd                                00000000
+rdee                              000000CE
+rdeeprom                          00000005
+rdkey                             000000BB
+rdnc00                            0000012D
+rdvc00                            0000013F
+readkey                           000000B2
+retl                              0000007C
+retln                             00000011
+retval                            00000010
+rp0                               00000005
+scankey                           00000013
+scankeyboard                      00000064
+scanln                            0000000F
+setbank                           
+start                             000000B9
+status                            00000003
+sterretje                         0000000A
+store00                           0000015C
+tries                             0000001D
+trisa                             00000085
+trisb                             00000086
+w                                 00000000
+waitwr                            00000011
+wr                                00000001
+wrcod                             00000040
+wreeprom                          00000009
+wren                              00000002
+wrerr                             00000003
+zero                              00000002
+MPASM  5.51                      CODESLOT.ASM   6-12-2026  14:00:29         PAGE 22
+
+
+MEMORY USAGE MAP ('X' = Used,  '-' = Unused)
+
+
+0000 : X---XXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0040 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0080 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+00C0 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0100 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0140 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXX------------ ----------------
+2000 : XXXX---X-------- ---------------- ---------------- ----------------
+2100 : XXXXXXXXX------- ---------------- ---------------- ----------------
+
+All other memory blocks unused.
+
+Program Memory Words Used:   353
+Program Memory Words Free:   671
+
+
+Errors   :     0
+Warnings :     0 reported,     1 suppressed
+Messages :     0 reported,    40 suppressed
+
+
